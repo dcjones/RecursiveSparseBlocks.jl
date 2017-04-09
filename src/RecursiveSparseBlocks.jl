@@ -155,6 +155,62 @@ for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_ins
 end
 
 
+function Base.eltype{T}(A::SparseMatrixRSB{T})
+    return T
+end
+
+
+function Base.show(io::IO, ::MIME"text/plain", A::SparseMatrixRSB)
+    m, n = size(A)
+    print(io, m, "×", n, " sparse RSB matrix with ", nnz(A), " ", eltype(A),
+          " stored entries")
+    if nnz(A) != 0
+        print(io, ":")
+        show(io, A)
+    end
+end
+
+
+Base.show(io::IO, S::SparseMatrixRSB) = Base.show(convert(IOContext, io),
+                                                  S::SparseMatrixRSB)
+
+function Base.show(io::IOContext, S::SparseMatrixRSB)
+    # Taken mostly from SparseMatrixCSC show function
+
+    if nnz(S) == 0
+        return show(io, MIME("text/plain"), S)
+    end
+
+    limit::Bool = get(io, :limit, false)
+    if limit
+        rows = displaysize(io)[1]
+        half_screen_rows = div(rows - 8, 2)
+    else
+        half_screen_rows = typemax(Int)
+    end
+    pad = ndigits(max(size(S)...))
+    k = 0
+    sep = "\n  "
+    if !haskey(io, :compact)
+        io = IOContext(io, :compact => true)
+    end
+
+    I, J, V = findnz(S)
+    k = 0
+    for (i, j, v) in zip(I, J, V)
+        if k < half_screen_rows || k > nnz(S)-half_screen_rows
+            print(io, sep, '[',
+                  rpad(i, pad), ", ",
+                  lpad(j, pad), "]  =  ")
+            Base.show(io, v)
+        elseif k == half_screen_rows
+            print(io, sep, '\u22ee')
+        end
+        k += 1
+    end
+end
+
+
 """
 Get matrix property.
 """
@@ -234,10 +290,6 @@ for (f, T) in (("BLAS_susset_element", Float32),
 end
 
 
-function Base.show(io::IO, ::MIME"text/plain", A::SparseMatrixRSB)
-end
-
-
 for (f, T) in (("BLAS_susget_diag", Float32),
                ("BLAS_dusget_diag", Float64),
                ("BLAS_cusget_diag", Complex64),
@@ -293,7 +345,6 @@ end
 
 
 # TODO:
-# show
 # convert{S, T}(::Type{SparseMatrixRSB{S}}, ::SparseMatrixRSB{T})
 # transpose / transpose! (set flag)
 # conj / conj! (set flag)
