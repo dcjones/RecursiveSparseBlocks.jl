@@ -86,13 +86,13 @@ end
 
 
 function Base.convert{T}(::Type{SparseMatrixCSC}, A::SparseMatrixRSB{T})
-    I, J, V = get_coo(A)
+    I, J, V = findnz(A)
     m, n = size(A)
     return sparse(I, J, V, m, n)
 end
 
 
-function get_coo{T}(A::SparseMatrixRSB{T})
+function Base.findnz{T}(A::SparseMatrixRSB{T})
     N = nnz(A)
     V = Array(T, N)
     I = Array(Cint, N)
@@ -126,7 +126,7 @@ for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_ins
             # This seems a little silly, but I can't find another way to clone a
             # blas_sparse_matrix.
 
-            I, J, V = get_coo(A)
+            I, J, V = findnz(A)
             m, n = size(A)
 
             ptr = ccall(($uscrbegin, librsb), BLASSparseMatrix, (Cint, Cint), m, n)
@@ -179,34 +179,122 @@ end
 
 
 function Base.size(A::SparseMatrixRSB)
-    (blas_usgp(A.ptr, blas_num_rows), blas_usgp(A.ptr, blas_num_cols))
+    return (Int(blas_usgp(A.ptr, blas_num_rows)),
+            Int(blas_usgp(A.ptr, blas_num_cols)))
 end
 
 
 function Base.size(A::SparseMatrixRSB, k::Integer)
     if k == 1
-        return blas_usgp(A.ptr, blas_num_rows)
+        return Int(blas_usgp(A.ptr, blas_num_rows))
     elseif k == 2
-        return blas_usgp(A.ptr, blas_num_cols)
+        return Int(blas_usgp(A.ptr, blas_num_cols))
     else
         return 1
     end
 end
 
+for (f, T) in (("BLAS_susget_element", Float32),
+               ("BLAS_dusget_element", Float64),
+               ("BLAS_cusget_element", Complex64),
+               ("BLAS_zusget_element", Complex128))
+    @eval begin
+        function Base.getindex(A::SparseMatrixRSB{$T}, i::Integer, j::Integer)
+            y = Ref{$T}()
+            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Cint, Cint, Ptr{$T}),
+                        A.ptr, i - 1, j - 1, y)
+            if err != 0
+                # Unfortunately I'm not sure there is a way to distinguish
+                # between zero-entry and actual error
+                return zero($T)
+            end
+            return y.x
+        end
+    end
+end
+
+
+for (f, T) in (("BLAS_susset_element", Float32),
+               ("BLAS_dusset_element", Float64),
+               ("BLAS_cusset_element", Complex64),
+               ("BLAS_zusset_element", Complex128))
+    @eval begin
+        function Base.setindex!(A::SparseMatrixRSB{$T}, value_, i::Integer, j::Integer)
+            value = $T(value_)
+            y = Ref{$T}(value)
+            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Cint, Cint, Ptr{$T}),
+                        A.ptr, i - 1, j - 1, y)
+            if err != 0
+                error("Cannot set zero entry ($i, $j) of a SparseMatrixRSB")
+            end
+            return value
+        end
+    end
+
+end
+
 
 function Base.show(io::IO, ::MIME"text/plain", A::SparseMatrixRSB)
-     # TODO
+end
+
+
+for (f, T) in (("BLAS_susget_diag", Float32),
+               ("BLAS_dusget_diag", Float64),
+               ("BLAS_cusget_diag", Complex64),
+               ("BLAS_zusget_diag", Complex128))
+    @eval begin
+        function Base.diag(A::SparseMatrixRSB{$T})
+            d = Array($T, min(size(A)...))
+            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Ptr{$T}),
+                        A.ptr, d)
+            if err != 0
+                error("usget_diag failed with code $(err)")
+            end
+            return d
+        end
+    end
+end
+
+
+function Base.full{T}(A::SparseMatrixRSB{T})
+    B = zeros(T, size(A))
+    I, J, V = findnz(A)
+    for (i, j, v) in zip(I, J, V)
+        B[i, j] = v
+    end
+    return B
+end
+
+
+for (f, T) in (("BLAS_susmv", Float32),
+               ("BLAS_dusmv", Float64),
+               ("BLAS_cusmv", Complex64),
+               ("BLAS_zusmv", Complex128))
+    # TODO: consider trans and conj state
+    @eval begin
+        function Base.A_mul_B!(y::Vector{$T}, A::SparseMatrixRSB{$T}, x::Vector{$T})
+            fill!(y, zero($T))
+            err = ccall(($f, librsb), Cint,
+                        (Cint,             # transA
+                         $T,               # alpha
+                         BLASSparseMatrix, # A
+                         Ptr{$T},          # x
+                         Cint,             # incx
+                         Ptr{$T},          # y
+                         Cint),            # incy
+                        blas_no_trans, one($T), A.ptr, x, 1, y, 1)
+            if err != 0
+                error("BLAS_susmv failed with code $(err)")
+            end
+            return y
+        end
+    end
 end
 
 
 # TODO:
 # show
 # convert{S, T}(::Type{SparseMatrixRSB{S}}, ::SparseMatrixRSB{T})
-# full / convert(::Type{Array}, ::SparseMatrixRSB)
-# findnz (I think just rename get_coo)
-# getindex (BLAS_?usget_element)
-# setindex! (BLAS_?usset_element)
-# diag (BLAS_?usget_diag)
 # transpose / transpose! (set flag)
 # conj / conj! (set flag)
 # SM*DV / A_mul_B! (BLAS_?usmv)
