@@ -24,8 +24,6 @@ end
 
 type SparseMatrixRSB{T} <: AbstractSparseMatrix{T, Cint}
     ptr::BLASSparseMatrix
-    transpose::Bool
-    conj::Bool
 end
 
 
@@ -77,7 +75,7 @@ for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_ins
                 error("BLAS_suscr_end failed with code $(err)")
             end
 
-            ret = SparseMatrixRSB{$T}(ptr, false, false)
+            ret = SparseMatrixRSB{$T}(ptr)
             finalizer(ret, destroy)
             return ret
         end
@@ -147,7 +145,7 @@ for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_ins
                 error("BLAS_suscr_end failed with code $(err)")
             end
 
-            ret = SparseMatrixRSB{$T}(ptr, false, false)
+            ret = SparseMatrixRSB{$T}(ptr)
             finalizer(ret, destroy)
             return ret
         end
@@ -318,27 +316,77 @@ function Base.full{T}(A::SparseMatrixRSB{T})
 end
 
 
-for (f, T) in (("BLAS_susmv", Float32),
-               ("BLAS_dusmv", Float64),
-               ("BLAS_cusmv", Complex64),
-               ("BLAS_zusmv", Complex128))
-    # TODO: consider trans and conj state
-    @eval begin
-        function Base.A_mul_B!(y::Vector{$T}, A::SparseMatrixRSB{$T}, x::Vector{$T})
-            fill!(y, zero($T))
-            err = ccall(($f, librsb), Cint,
-                        (Cint,             # transA
-                         $T,               # alpha
-                         BLASSparseMatrix, # A
-                         Ptr{$T},          # x
-                         Cint,             # incx
-                         Ptr{$T},          # y
-                         Cint),            # incy
-                        blas_no_trans, one($T), A.ptr, x, 1, y, 1)
-            if err != 0
-                error("BLAS_susmv failed with code $(err)")
+# Sparse matrix by vector multiplication
+for (blasfun, T, alphaT, alpha_value) in
+                (("BLAS_susmv", Float32, Float32, 1.0f0),
+                 ("BLAS_dusmv", Float64, Float64, 1.0),
+                 ("BLAS_cusmv", Complex64, Ptr{Complex64}, Ref(one(Complex64))),
+                 ("BLAS_zusmv", Complex128, Ptr{Complex128}, Ref(one(Complex128))))
+    for (f, op) in ((:A_mul_B!,  :blas_no_trans),
+                    (:At_mul_B!, :blas_trans),
+                    (:Ac_mul_B!, :blas_conj_trans))
+        @eval begin
+            function Base.$f(y::Vector{$T}, A::SparseMatrixRSB{$T}, x::Vector{$T})
+                m, n = size(A)
+                @assert length(y) == n
+                alpha = $alpha_value
+
+                fill!(y, zero($T))
+                err = ccall(($blasfun, librsb), Cint,
+                            (Cint,             # transA
+                             $alphaT,          # alpha
+                             BLASSparseMatrix, # A
+                             Ptr{$T},          # x
+                             Cint,             # incx
+                             Ptr{$T},          # y
+                             Cint),            # incy
+                            $op, alpha, A.ptr, x, 1, y, 1)
+                if err != 0
+                    error("$blasfun failed with code $err")
+                end
+                return y
             end
-            return y
+        end
+    end
+end
+
+
+# Sparse matrix by dense matrix multiplication
+for (blasfun, T, alphaT, alpha_value) in
+                (("BLAS_susmm", Float32, Float32, 1.0f0),
+                 ("BLAS_dusmm", Float64, Float64, 1.0),
+                 ("BLAS_cusmm", Complex64, Ptr{Complex64}, Ref(one(Complex64))),
+                 ("BLAS_zusmm", Complex128, Ptr{Complex128}, Ref(one(Complex128))))
+    for (f, op) in ((:A_mul_B!,  :blas_no_trans),
+                    (:At_mul_B!, :blas_trans),
+                    (:Ac_mul_B!, :blas_conj_trans))
+        @eval begin
+            function Base.$f(C::Matrix{$T}, A::SparseMatrixRSB{$T}, B::Matrix{$T})
+                ma, na = size(A)
+                mb, nb = size(B)
+
+                @assert na == mb
+                @assert size(C) == (na, nb)
+
+                alpha = $alpha_value
+                fill!(C, zero($T))
+                err = ccall(($blasfun, librsb), Cint,
+                            (Cint,             # order
+                             Cint,             # trans
+                             Cint,             # nrhs
+                             $alphaT,          # alpha
+                             BLASSparseMatrix, # A
+                             Ptr{$T},          # B
+                             Cint,             # leading B dimension
+                             Ptr{$T},          # C
+                             Cint),            # leading C dimension
+                            blas_colmajor, $op, nb, alpha, A.ptr, B, mb, C, na)
+
+                if err != 0
+                    error(string($blasfun, " failed with code $err"))
+                end
+                return C
+            end
         end
     end
 end
@@ -346,10 +394,8 @@ end
 
 # TODO:
 # convert{S, T}(::Type{SparseMatrixRSB{S}}, ::SparseMatrixRSB{T})
-# transpose / transpose! (set flag)
-# conj / conj! (set flag)
-# SM*DV / A_mul_B! (BLAS_?usmv)
-# SM*DM (BLAS_?usmm)
+# transpose / transpose!
+# conj / conj!
 # A_ldiv_B! / trisolve (BLAS_?ussv, BLAS_?ussm)
 # + (I think we just insert elements with the right flag set if we want to add)
 

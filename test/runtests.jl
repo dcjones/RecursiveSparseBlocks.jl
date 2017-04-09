@@ -78,4 +78,30 @@ end
 end
 
 
+@testset "Multiplication" begin
+    # sparse matrix by dense vector
+    for T in [Float32, Float64, Complex64, Complex128]
+        n = 1000
+        A = sprand(T, n, n, 0.1)
+        B = SparseMatrixRSB(A)
+        x = rand(T, n)
+        ay = A*x
+        by = B*x
+
+        @test_approx_eq_eps maximum(abs(ay .- by)) zero(T) 1e-4
+    end
+
+    for T in [Float32, Float64, Complex64, Complex128]
+        n = 1000
+        k = 100
+        A = sprand(T, n, n, 0.1)
+        B = SparseMatrixRSB(A)
+        X = rand(T, (n, k))
+
+        AX = A*X
+        BX = B*X
+
+        @test_approx_eq_eps maximum(abs(AX .- BX)) zero(T) 1e-4
+    end
+end
 

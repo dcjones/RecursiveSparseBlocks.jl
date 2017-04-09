@@ -1,7 +1,7 @@
 
 # blas_order_type
 const blas_rowmajor = 101
-const blas_colmajor = 101
+const blas_colmajor = 102
 
 # blas_trans_type
 const blas_no_trans   = 111
