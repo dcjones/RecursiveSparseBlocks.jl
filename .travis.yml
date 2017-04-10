@@ -1,5 +1,7 @@
 
 language: julia
+before_install:
+    - sudo apt-get install gfortran
 julia:
   - release
   - nightly
