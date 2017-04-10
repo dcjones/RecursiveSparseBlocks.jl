@@ -83,6 +83,42 @@ for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_ins
 end
 
 
+for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_insert_entries", "BLAS_suscr_end"), :Float32),
+                                           (("BLAS_duscr_begin", "BLAS_duscr_insert_entries", "BLAS_duscr_end"), :Float64),
+                                           (("BLAS_cuscr_begin", "BLAS_cuscr_insert_entries", "BLAS_cuscr_end"), :Complex64),
+                                           (("BLAS_zuscr_begin", "BLAS_zuscr_insert_entries", "BLAS_zuscr_end"), :Complex128))
+    @eval begin
+        function SparseMatrixRSB(I_, J_, V::Vector{$T}, m::Integer, n::Integer)
+            nnz = length(V)
+            I = Array(Cint, nnz)
+            J = Array(Cint, nnz)
+            for i in 1:nnz
+                I[i] = I_[i] - 1
+                J[i] = J_[i] - 1
+            end
+
+            ptr = ccall(($uscrbegin, librsb), BLASSparseMatrix, (Cint, Cint), m, n)
+            if ptr == -1
+                error("failed to initialize matrix")
+            end
+
+            err = ccall(($uscrins, librsb), Cint,
+                        (BLASSparseMatrix, Cint, Ptr{$T}, Ptr{Cint}, Ptr{Cint}),
+                        ptr, nnz, V, I, J)
+
+            err = ccall(($uscrend, librsb), Cint, (BLASSparseMatrix,), ptr)
+            if err != 0
+                error("BLAS_suscr_end failed with code $(err)")
+            end
+
+            ret = SparseMatrixRSB{$T}(ptr)
+            finalizer(ret, destroy)
+            return ret
+        end
+    end
+end
+
+
 function Base.convert{T}(::Type{SparseMatrixCSC}, A::SparseMatrixRSB{T})
     I, J, V = findnz(A)
     m, n = size(A)

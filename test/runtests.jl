@@ -8,6 +8,14 @@ using RecursiveSparseBlocks
         B = SparseMatrixRSB(A)
         @test convert(SparseMatrixCSC, B) == A
     end
+
+    for T in [Float32, Float64, Complex64, Complex128]
+        A = sprand(T, 1000, 1000, 0.1)
+        I, J, V = findnz(A)
+        m, n = size(A)
+        B = SparseMatrixRSB(I, J, V, m, n)
+        @test convert(SparseMatrixCSC, B) == A
+    end
 end
 
 
