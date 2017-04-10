@@ -1,6 +1,8 @@
 
 # RecursiveSparseBlocks
 
+![Travis Status](https://travis-ci.org/dcjones/RecursiveSparseBlocks.jl.svg?branch=master)
+
 Julia interface to [librsb](http://librsb.sourceforge.net/), a general purpose
 sparse matrix library that claims to be broadly competitive with MKL on the
 subset of functions it implements but is open source and more permissively
