@@ -364,7 +364,13 @@ for (blasfun, T, alphaT, alpha_value) in
         @eval begin
             function Base.$f(y::Vector{$T}, A::SparseMatrixRSB{$T}, x::Vector{$T})
                 m, n = size(A)
-                @assert length(y) == n
+                if $op == blas_no_trans
+                    @assert length(x) == n
+                    @assert length(y) == m
+                else
+                    @assert length(x) == m
+                    @assert length(y) == n
+                end
                 alpha = $alpha_value
 
                 fill!(y, zero($T))
@@ -400,9 +406,15 @@ for (blasfun, T, alphaT, alpha_value) in
             function Base.$f(C::Matrix{$T}, A::SparseMatrixRSB{$T}, B::Matrix{$T})
                 ma, na = size(A)
                 mb, nb = size(B)
+                mc, nc = size(C)
 
-                @assert na == mb
-                @assert size(C) == (na, nb)
+                if $op == blas_no_trans
+                    @assert na == mb
+                    @assert (mc, nc) == (ma, nb)
+                else
+                    @assert ma == mb
+                    @assert (mc, nc) == (na, nb)
+                end
 
                 alpha = $alpha_value
                 fill!(C, zero($T))
