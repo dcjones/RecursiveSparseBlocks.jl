@@ -4,7 +4,7 @@ using BinDeps
 
 librsb = library_dependency("librsb")
 
-version = "1.2.0-rc6"
+version = "1.2.0-rc7"
 provides(Sources,
     Dict(URI("https://downloads.sourceforge.net/project/librsb/librsb-$version.tar.gz") => librsb))
 
