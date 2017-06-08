@@ -1,78 +1,80 @@
 
-# blas_order_type
-const blas_rowmajor = 101
-const blas_colmajor = 102
+# Flags
+const RSB_FLAG_NOFLAGS                                 = 0x000000
+const RSB_FLAG_IDENTICAL_FLAGS                         = RSB_FLAG_NOFLAGS
+const RSB_FLAG_FORTRAN_INDICES_INTERFACE               = 0x000001
+const RSB_FLAG_C_INDICES_INTERFACE                     = 0x000000
+const RSB_FLAG_USE_HALFWORD_INDICES                    = 0x000002
+const RSB_FLAG_WANT_ROW_MAJOR_ORDER                    = 0x000000
+const RSB_FLAG_WANT_COLUMN_MAJOR_ORDER                 = 0x4000000
+const RSB_FLAG_SORTED_INPUT                            = 0x000004
+const RSB_FLAG_TRIANGULAR                              = 0x000008
+const RSB_FLAG_LOWER                                   = 0x000010
+const RSB_FLAG_UPPER                                   = 0x000020
+const RSB_FLAG_UNIT_DIAG_IMPLICIT                      = 0x000040
+const RSB_FLAG_WANT_COO_STORAGE                        = 0x000100
+const RSB_FLAG_DUPLICATES_KEEP_LAST                    = 0x000000
+const RSB_FLAG_DUPLICATES_DEFAULT_HANDLE               = 0x000000
+const RSB_FLAG_DUPLICATES_SUM                          = 0x000200
+const RSB_FLAG_DISCARD_ZEROS                           = 0x000400
+const RSB_FLAG_QUAD_PARTITIONING                       = 0x002000
+const RSB_FLAG_WANT_BCSS_STORAGE                       = 0x004000
+const RSB_FLAG_ASSEMBLED_IN_COO_ARRAYS                 = 0x040000
+const RSB_FLAG_EXPERIMENTAL_IN_PLACE_PERMUTATION_SORT  = 0x080000
+const RSB_FLAG_SYMMETRIC                               = 0x400000
+const RSB_FLAG_HERMITIAN                               = 0x800000
+const RSB_FLAG_RECURSIVE_MORE_LEAVES_THAN_THREADS      = 0x1000000
+const RSB_FLAG_LOWER_HERMITIAN          = (RSB_FLAG_HERMITIAN | RSB_FLAG_LOWER)
+const RSB_FLAG_UPPER_HERMITIAN          = (RSB_FLAG_HERMITIAN | RSB_FLAG_UPPER)
+const RSB_FLAG_LOWER_TRIANGULAR         = (RSB_FLAG_TRIANGULAR | RSB_FLAG_LOWER)
+const RSB_FLAG_UPPER_TRIANGULAR         = (RSB_FLAG_TRIANGULAR | RSB_FLAG_UPPER)
+const RSB_FLAG_LOWER_SYMMETRIC          = (RSB_FLAG_SYMMETRIC | RSB_FLAG_LOWER)
+const RSB_FLAG_DIAGONAL                 = (RSB_FLAG_UPPER | RSB_FLAG_LOWER)
+const RSB_FLAG_UPPER_SYMMETRIC          = (RSB_FLAG_SYMMETRIC | RSB_FLAG_UPPER)
+const RSB_FLAG_RECURSIVE_SUBDIVIDE_MORE_ON_DIAG        = 0x8000000
+const RSB_FLAG_EXTERNALLY_ALLOCATED_ARRAYS             = 0x40000000
+const RSB_FLAG_USE_CSR_RESERVED                        = 0x200000
+const RSB_FLAG_USE_HALFWORD_INDICES_CSR      = (RSB_FLAG_USE_HALFWORD_INDICES|RSB_FLAG_USE_CSR_RESERVED)
+const RSB_FLAG_USE_HALFWORD_INDICES_COO      = (RSB_FLAG_USE_HALFWORD_INDICES|RSB_FLAG_WANT_COO_STORAGE)
+const RSB_FLAG_MUTUALLY_EXCLUSIVE_SWITCHES   = (RSB_FLAG_USE_HALFWORD_INDICES_COO|RSB_FLAG_USE_HALFWORD_INDICES_CSR)
+const RSB_FLAG_DEFAULT_STORAGE_FLAGS         = (RSB_FLAG_WANT_BCSS_STORAGE|RSB_FLAG_WANT_COO_STORAGE)
+const RSB_FLAG_DEFAULT_COO_MATRIX_FLAGS      = RSB_FLAG_WANT_COO_STORAGE
+const RSB_FLAG_DEFAULT_CSR_MATRIX_FLAGS      = RSB_FLAG_WANT_BCSS_STORAGE
+const RSB_FLAG_DEFAULT_RSB_MATRIX_FLAGS      = (RSB_FLAG_QUAD_PARTITIONING|RSB_FLAG_USE_HALFWORD_INDICES|RSB_FLAG_WANT_COO_STORAGE|RSB_FLAG_WANT_BCSS_STORAGE)
+const RSB_FLAG_DEFAULT_MATRIX_FLAGS          = RSB_FLAG_DEFAULT_RSB_MATRIX_FLAGS
 
-# blas_trans_type
-const blas_no_trans   = 111
-const blas_trans      = 112
-const blas_conj_trans = 113
+# Transpose flags
+const RSB_TRANSPOSITION_N = 0x4E
+const RSB_TRANSPOSITION_T = 0x54
+const RSB_TRANSPOSITION_C = 0x43
 
-# blas_uplo_type
-const blas_upper = 121
-const blas_lower = 122
+# Info flags
+const RSB_MIF_INDEX_STORAGE_IN_BYTES__TO__SIZE_T             = 0x00000001
+const RSB_MIF_INDEX_STORAGE_IN_BYTES_PER_NNZ__TO__RSB_REAL_T = 0x00000002
+const RSB_MIF_MATRIX_ROWS__TO__RSB_COO_INDEX_T               = 0x00000004
+const RSB_MIF_MATRIX_COLS__TO__RSB_COO_INDEX_T               = 0x00000008
+const RSB_MIF_MATRIX_NNZ__TO__RSB_NNZ_INDEX_T                = 0x00000010
+const RSB_MIF_TOTAL_SIZE__TO__SIZE_T                         = 0x00000020
+const RSB_MIF_MATRIX_FLAGS__TO__RSB_FLAGS_T                  = 0x00000040
+const RSB_MIF_MATRIX_TYPECODE__TO__RSB_TYPE_T                = 0x00000080
+const RSB_MIF_MATRIX_INFO__TO__CHAR_P                        = 0x00000100
+const RSB_MIF_LEAVES_COUNT__TO__RSB_BLK_INDEX_T              = 0x00000200
 
-# blas_diag_type
-const blas_non_unit_diag = 131
-const blas_unit_diag     = 132
+# Vector extraction flags
+const RSB_EXTF_NORM_ONE  = 0x00001001
+const RSB_EXTF_NORM_TWO  = 0x00001002
+const RSB_EXTF_NORM_INF  = 0x00001003
+const RSB_EXTF_SUMS_ROW  = 0x00001004
+const RSB_EXTF_SUMS_COL  = 0x00001005
+const RSB_EXTF_ASUMS_ROW = 0x00001006
+const RSB_EXTF_ASUMS_COL = 0x00001007
+const RSB_EXTF_DIAG      = 0x00000004
 
-# blas_side_type
-const blas_left_side  = 141
-const blas_right_side = 142
 
-# blas_base_type
-const blas_zero_base = 221
-const blas_one_base  = 222
+# Errors
+const RSB_ERR_NO_ERROR = 0x000
 
-# blas_symmetry_type
-const blas_general          = 231
-const blas_symmetric        = 232
-const blas_hermitian        = 233
-const blas_triangular       = 234
-const blas_lower_triangular = 235
-const blas_upper_triangular = 236
-const blas_lower_symmetric  = 237
-const blas_upper_symmetric  = 238
-const blas_lower_hermitian  = 239
-const blas_upper_hermitian  = 240
 
-# blas_field_type
-const blas_complex          = 241
-const blas_real             = 242
-const blas_double_precision = 243
-const blas_single_precision = 244
-
-# blas_size_type
-const blas_num_rows     = 251
-const blas_num_cols     = 252
-const blas_num_nonzeros = 253
-
-# blas_handle_type
-const blas_invalid_handle = 261
-const blas_new_handle     = 262
-const blas_open_handle    = 263
-const blas_valid_handle   = 264
-
-# blas_sparsity_optimization_type
-const blas_regular     = 271
-const blas_irregular   = 272
-const blas_block       = 273
-const blas_unassembled = 274
-
-# blas_rsb_ext_type
-const blas_rsb_spmv_autotuning_on      = 6660
-const blas_rsb_spmv_autotuning_off     = 6661
-const blas_rsb_spmv_n_autotuning_on    = 6662
-const blas_rsb_spmv_n_autotuning_off   = 6663
-const blas_rsb_spmv_t_autotuning_on    = 6664
-const blas_rsb_spmv_t_autotuning_off   = 6665
-const blas_rsb_autotune_next_operation = 6666
-const blas_rsb_rep_rsb                 = 9995
-const blas_rsb_rep_csr                 = 9996
-const blas_rsb_rep_coo                 = 9997
-const blas_rsb_duplicates_ovw          = 9998
-const blas_rsb_duplicates_sum          = 9999
-
-const RSB_FLAG_FORTRAN_INDICES_INTERFACE = 0x000001
-const RSB_FLAG_C_INDICES_INTERFACE       = 0x000000
-
+const RSB_DEFAULT_ROW_BLOCKING = 1
+const RSB_DEFAULT_COL_BLOCKING = 1
+const RSB_DEFAULT_BLOCKING     = 1

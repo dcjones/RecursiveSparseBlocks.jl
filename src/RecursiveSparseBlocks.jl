@@ -7,8 +7,14 @@ include("../deps/deps.jl")
 include("constants.jl")
 
 
-typealias BLASSparseMatrix Cint
-typealias RSBErr Cint
+const RSBCooIdx = Cint
+const RSBNnzIdx = Cint
+const RSBType   = Cchar
+const RSBFlags  = Cint
+const RSBErr    = Cint
+const RSBChar   = Cchar
+const RSBBlkIdx = Cint
+const RSBTrans  = RSBFlags
 
 
 function __init__()
@@ -23,99 +29,92 @@ end
 
 
 type SparseMatrixRSB{T} <: AbstractSparseMatrix{T, Cint}
-    ptr::BLASSparseMatrix
+    ptr::Ptr{Void}
 end
 
 
-function destroy(M::SparseMatrixRSB)
-    err = ccall((:BLAS_usds, librsb), Cint, (BLASSparseMatrix,), M.ptr)
-    if err != 0
-        error("BLAS_usds call failed with code $(err)")
-    end
+function rsb_mtx_free(A::SparseMatrixRSB)
+    ccall((:rsb_mtx_free, librsb), Ptr{Void}, (Ptr{Void},), A.ptr)
 end
 
 
-for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_insert_col", "BLAS_suscr_end"), :Float32),
-                                           (("BLAS_duscr_begin", "BLAS_duscr_insert_col", "BLAS_duscr_end"), :Float64),
-                                           (("BLAS_cuscr_begin", "BLAS_cuscr_insert_col", "BLAS_cuscr_end"), :Complex64),
-                                           (("BLAS_zuscr_begin", "BLAS_zuscr_insert_col", "BLAS_zuscr_end"), :Complex128))
-    @eval begin
-        function SparseMatrixRSB(A::SparseMatrixCSC{$T})
-            m, n = size(A)
-            nnz = length(A.nzval)
-
-            ptr = ccall(($uscrbegin, librsb), BLASSparseMatrix, (Cint, Cint), m, n)
-            if ptr == -1
-                error("failed to initialize matrix")
-            end
-
-            colrowval = Cint[]
-
-            for j in 1:n
-                colnnz = A.colptr[j+1] - A.colptr[j]
-                if length(colrowval) < colnnz
-                    resize!(colrowval, colnnz)
-                end
-                copy!(colrowval, 1, A.rowval, A.colptr[j], colnnz)
-                colrowval .-= 1
-
-                err = ccall(($uscrins, librsb), Cint,
-                            (BLASSparseMatrix, Cint, Cint, Ptr{$T}, Ptr{Cint}),
-                            ptr, j - 1, colnnz, pointer(A.nzval, A.colptr[j]),
-                            colrowval)
-
-                if err != 0
-                    error("insert_col failed with code $(err)")
-                end
-            end
-
-
-            err = ccall(($uscrend, librsb), Cint, (BLASSparseMatrix,), ptr)
-            if err != 0
-                error("BLAS_suscr_end failed with code $(err)")
-            end
-
-            ret = SparseMatrixRSB{$T}(ptr)
-            finalizer(ret, destroy)
-            return ret
+function check_rsb_error(err::RSBErr)
+    if err != RSB_ERR_NO_ERROR
+        buflen = 5000
+        buf = Array{UInt8}(buflen)
+        ccall((:rsb_strerror_r, librsb), RSBErr, (RSBErr, Ptr{RSBChar}, Csize_t),
+              err, buf, buflen)
+        i = findfirst(0x0, buf)
+        if i == 0
+            error("SparseMatrixRSB operation failed with code $(err)")
+        else
+            error(String(buf[1:i-1]))
         end
     end
 end
 
 
-for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_insert_entries", "BLAS_suscr_end"), :Float32),
-                                           (("BLAS_duscr_begin", "BLAS_duscr_insert_entries", "BLAS_duscr_end"), :Float64),
-                                           (("BLAS_cuscr_begin", "BLAS_cuscr_insert_entries", "BLAS_cuscr_end"), :Complex64),
-                                           (("BLAS_zuscr_begin", "BLAS_zuscr_insert_entries", "BLAS_zuscr_end"), :Complex128))
-    @eval begin
-        function SparseMatrixRSB(I_, J_, V::Vector{$T}, m::Integer, n::Integer)
-            nnz = length(V)
-            I = Array(Cint, nnz)
-            J = Array(Cint, nnz)
-            for i in 1:nnz
-                I[i] = I_[i] - 1
-                J[i] = J_[i] - 1
-            end
+@inline function rsb_type_code{T}(::Type{T})
+    typ = T == Float32    ? 'S' :
+          T == Float64    ? 'D' :
+          T == Complex64  ? 'C' :
+          T == Complex128 ? 'Z' :
+          error("librsb does not support matrices of type $T")
+    return typ
+end
 
-            ptr = ccall(($uscrbegin, librsb), BLASSparseMatrix, (Cint, Cint), m, n)
-            if ptr == -1
-                error("failed to initialize matrix")
-            end
 
-            err = ccall(($uscrins, librsb), Cint,
-                        (BLASSparseMatrix, Cint, Ptr{$T}, Ptr{Cint}, Ptr{Cint}),
-                        ptr, nnz, V, I, J)
+function SparseMatrixRSB{T}(A::SparseMatrixCSC{T})
+    typ = rsb_type_code(T)
+    m, n = size(A)
+    nnz = length(A.nzval)
 
-            err = ccall(($uscrend, librsb), Cint, (BLASSparseMatrix,), ptr)
-            if err != 0
-                error("BLAS_suscr_end failed with code $(err)")
-            end
+    IA = Vector{RSBCooIdx}(A.rowval)
+    CP = Vector{RSBCooIdx}(A.colptr)
 
-            ret = SparseMatrixRSB{$T}(ptr)
-            finalizer(ret, destroy)
-            return ret
-        end
-    end
+    # make zero based
+    IA .-= 1
+    CP .-= 1
+
+    err = Ref{RSBErr}()
+    ptr = ccall((:rsb_mtx_alloc_from_csc_const, librsb), Ptr{Void},
+                (Ptr{Void}, Ptr{RSBCooIdx}, Ptr{RSBCooIdx}, RSBNnzIdx, RSBType,
+                 RSBCooIdx, RSBCooIdx, RSBBlkIdx, RSBBlkIdx, RSBFlags,
+                 Ptr{RSBErr}),
+                A.nzval, IA, CP, nnz, typ, m, n,
+                RSB_DEFAULT_ROW_BLOCKING, RSB_DEFAULT_COL_BLOCKING,
+                RSB_FLAG_DEFAULT_RSB_MATRIX_FLAGS, err)
+    check_rsb_error(err.x)
+
+    ret = SparseMatrixRSB{T}(ptr)
+    finalizer(ret, rsb_mtx_free)
+    return ret
+end
+
+
+function SparseMatrixRSB{T}(I_, J_, V::Vector{T}, m::Integer, n::Integer)
+    typ = rsb_type_code(T)
+    nnz = length(V)
+    I = Vector{RSBCooIdx}(I_)
+    J = Vector{RSBCooIdx}(J_)
+
+    # make zero based
+    I .-= 1
+    J .-= 1
+
+    err = Ref{RSBErr}()
+    ptr = ccall((:rsb_mtx_alloc_from_coo_const, librsb), Ptr{Void},
+                (Ptr{Void}, Ptr{RSBCooIdx}, Ptr{RSBCooIdx}, RSBNnzIdx, RSBType,
+                 RSBCooIdx, RSBCooIdx, RSBBlkIdx, RSBBlkIdx, RSBFlags,
+                 Ptr{RSBErr}),
+                V, I, J, nnz, typ, m, n,
+                RSB_DEFAULT_ROW_BLOCKING, RSB_DEFAULT_COL_BLOCKING,
+                RSB_FLAG_DEFAULT_RSB_MATRIX_FLAGS, err)
+    check_rsb_error(err.x)
+
+    ret = SparseMatrixRSB{T}(ptr)
+    finalizer(ret, rsb_mtx_free)
+    return ret
 end
 
 
@@ -128,64 +127,33 @@ end
 
 function Base.findnz{T}(A::SparseMatrixRSB{T})
     N = nnz(A)
-    V = Array(T, N)
-    I = Array(Cint, N)
-    J = Array(Cint, N)
-
-    mtxptr = ccall((:rsb_blas_get_mtx, librsb), Ptr{Void},
-                   (BLASSparseMatrix,), A.ptr)
-    if mtxptr == C_NULL
-        error("rsb_blas_get_mtx did not return a valid matrix pointer")
-    end
+    V = Array{T}(N)
+    I = Array{RSBCooIdx}(N)
+    J = Array{RSBCooIdx}(N)
 
     err = ccall((:rsb_mtx_get_coo, librsb), RSBErr,
-              (Ptr{Void}, Ptr{T}, Ptr{Cint}, Ptr{Cint}, Cint),
-              mtxptr,     V,      I,         J,
-              RSB_FLAG_FORTRAN_INDICES_INTERFACE)
-    if err != 0
-        error("rsb_mtx_get_coo failed with code $(err)")
-    end
+                (Ptr{Void}, Ptr{Void}, Ptr{RSBCooIdx}, Ptr{RSBCooIdx},
+                 RSBFlags),
+                A.ptr, V, I, J, RSB_FLAG_FORTRAN_INDICES_INTERFACE)
+    check_rsb_error(err)
 
     return (I, J, V)
 end
 
 
-for ((uscrbegin, uscrins, uscrend), T) in ((("BLAS_suscr_begin", "BLAS_suscr_insert_entries", "BLAS_suscr_end"), :Float32),
-                                           (("BLAS_duscr_begin", "BLAS_duscr_insert_entries", "BLAS_duscr_end"), :Float64),
-                                           (("BLAS_cuscr_begin", "BLAS_cuscr_insert_entries", "BLAS_cuscr_end"), :Complex64),
-                                           (("BLAS_zuscr_begin", "BLAS_zuscr_insert_entries", "BLAS_zuscr_end"), :Complex128))
-    @eval begin
-        function Base.copy(A::SparseMatrixRSB{$T})
-            # Dump the matrix to COO, then insert those entries into a new matrix.
-            # This seems a little silly, but I can't find another way to clone a
-            # blas_sparse_matrix.
+function Base.copy{T}(A::SparseMatrixRSB{T})
+    typ = rsb_type_code(T)
+    Bptr = Ref{Ptr{Void}}()
+    err = ccall((:rsb_mtx_clone, librsb), RSBErr,
+                (Ptr{Ptr{Void}}, RSBType, RSBTrans, Ptr{Void}, Ptr{Void}, RSBFlags),
+                BPtr, typ, RSB_TRANSPOSITION_N, C_NULL, A.ptr,
+                RSB_FLAG_DEFAULT_RSB_MATRIX_FLAGS)
+    check_rsb_error(err)
 
-            I, J, V = findnz(A)
-            m, n = size(A)
 
-            ptr = ccall(($uscrbegin, librsb), BLASSparseMatrix, (Cint, Cint), m, n)
-            if ptr == -1
-                error("failed to initialize matrix")
-            end
-
-            err = ccall(($uscrins, librsb), Cint,
-                        (BLASSparseMatrix, Cint, Ptr{$T}, Ptr{Cint}, Ptr{Cint}),
-                        ptr, length(V), V, I, J)
-            if err != 0
-                error("insert_entries failed with code $(err)")
-            end
-
-            err = ccall(($uscrend, librsb), Cint, (BLASSparseMatrix,), ptr)
-
-            if err != 0
-                error("BLAS_suscr_end failed with code $(err)")
-            end
-
-            ret = SparseMatrixRSB{$T}(ptr)
-            finalizer(ret, destroy)
-            return ret
-        end
-    end
+    ret = SparseMatrixRSB{T}(Bptr.x)
+    finalizer(ret, rsb_mtx_free)
+    return ret
 end
 
 
@@ -245,100 +213,89 @@ function Base.show(io::IOContext, S::SparseMatrixRSB)
 end
 
 
-"""
-Get matrix property.
-"""
-function blas_usgp(ptr::BLASSparseMatrix, pname::Integer)
-    return ccall((:rsb_wp__BLAS_usgp, librsb), Cint, (BLASSparseMatrix, Cint),
-                 ptr, pname)
-end
-
-
-"""
-Set matrix property.
-"""
-function blas_ussp(ptr::BLASSparseMatrix, pname::Integer)
-    return ccall((:rsb_wp__BLAS_ussp, librsb), Cint, (BLASSparseMatrix, Cint),
-                 ptr, pname)
-end
-
-
 function Base.nnz(A::SparseMatrixRSB)
-    return blas_usgp(A.ptr, blas_num_nonzeros)
+    out = Ref{RSBNnzIdx}()
+    err = ccall((:rsb_mtx_get_info, librsb), RSBErr,
+                (Ptr{Void}, Cint, Ptr{Void}),
+                A.ptr, RSB_MIF_MATRIX_NNZ__TO__RSB_NNZ_INDEX_T, out)
+    check_rsb_error(err)
+    return Int(out.x)
+end
+
+
+function rsb_get_nrows(A::SparseMatrixRSB)
+    out = Ref{RSBCooIdx}()
+    err = ccall((:rsb_mtx_get_info, librsb), RSBErr,
+                (Ptr{Void}, Cint, Ptr{Void}),
+                A.ptr, RSB_MIF_MATRIX_ROWS__TO__RSB_COO_INDEX_T, out)
+    check_rsb_error(err)
+    return out.x
+end
+
+
+function rsb_get_ncols(A::SparseMatrixRSB)
+    out = Ref{RSBCooIdx}()
+    err = ccall((:rsb_mtx_get_info, librsb), RSBErr,
+                (Ptr{Void}, Cint, Ptr{Void}),
+                A.ptr, RSB_MIF_MATRIX_COLS__TO__RSB_COO_INDEX_T, out)
+    check_rsb_error(err)
+    return out.x
 end
 
 
 function Base.size(A::SparseMatrixRSB)
-    return (Int(blas_usgp(A.ptr, blas_num_rows)),
-            Int(blas_usgp(A.ptr, blas_num_cols)))
+    return (Int(rsb_get_nrows(A)),
+            Int(rsb_get_ncols(A)))
 end
 
 
 function Base.size(A::SparseMatrixRSB, k::Integer)
     if k == 1
-        return Int(blas_usgp(A.ptr, blas_num_rows))
+        return Int(rsb_get_nrows(A))
     elseif k == 2
-        return Int(blas_usgp(A.ptr, blas_num_cols))
+        return Int(rsb_get_ncols(A))
     else
         return 1
     end
 end
 
-for (f, T) in (("BLAS_susget_element", Float32),
-               ("BLAS_dusget_element", Float64),
-               ("BLAS_cusget_element", Complex64),
-               ("BLAS_zusget_element", Complex128))
-    @eval begin
-        function Base.getindex(A::SparseMatrixRSB{$T}, i::Integer, j::Integer)
-            y = Ref{$T}()
-            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Cint, Cint, Ptr{$T}),
-                        A.ptr, i - 1, j - 1, y)
-            if err != 0
-                # Unfortunately I'm not sure there is a way to distinguish
-                # between zero-entry and actual error
-                return zero($T)
-            end
-            return y.x
-        end
+
+function Base.getindex{T}(A::SparseMatrixRSB{T}, i::Integer, j::Integer)
+    yptr = Ref{T}()
+    iptr = Ref{RSBCooIdx}(i)
+    jptr = Ref{RSBCooIdx}(j)
+    err = ccall((:rsb_mtx_get_vals, librsb), RSBErr,
+                (Ptr{Void}, Ptr{Void}, Ptr{Void}, Ptr{Void}, RSBNnzIdx,
+                 RSBFlags),
+                A.ptr, yptr, iptr, jptr, 1, RSB_FLAG_FORTRAN_INDICES_INTERFACE)
+    if err == -1
+        return zero(T)
     end
+    check_rsb_error(err)
+    return yptr.x
 end
 
 
-for (f, T) in (("BLAS_susset_element", Float32),
-               ("BLAS_dusset_element", Float64),
-               ("BLAS_cusset_element", Complex64),
-               ("BLAS_zusset_element", Complex128))
-    @eval begin
-        function Base.setindex!(A::SparseMatrixRSB{$T}, value_, i::Integer, j::Integer)
-            value = $T(value_)
-            y = Ref{$T}(value)
-            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Cint, Cint, Ptr{$T}),
-                        A.ptr, i - 1, j - 1, y)
-            if err != 0
-                error("Cannot set zero entry ($i, $j) of a SparseMatrixRSB")
-            end
-            return value
-        end
-    end
-
+function Base.setindex!{T}(A::SparseMatrixRSB{T}, value, i::Integer, j::Integer)
+    yptr = Ref{T}(value)
+    iptr = Ref{RSBCooIdx}(i)
+    jptr = Ref{RSBCooIdx}(j)
+    err = ccall((:rsb_mtx_set_vals, librsb), RSBErr,
+                (Ptr{Void}, Ptr{Void}, Ptr{Void}, Ptr{Void}, RSBNnzIdx,
+                 RSBFlags),
+                A.ptr, yptr, iptr, jptr, 1, RSB_FLAG_FORTRAN_INDICES_INTERFACE)
+    check_rsb_error(err)
+    return yptr.x
 end
 
 
-for (f, T) in (("BLAS_susget_diag", Float32),
-               ("BLAS_dusget_diag", Float64),
-               ("BLAS_cusget_diag", Complex64),
-               ("BLAS_zusget_diag", Complex128))
-    @eval begin
-        function Base.diag(A::SparseMatrixRSB{$T})
-            d = Array($T, min(size(A)...))
-            err = ccall(($f, librsb), Cint, (BLASSparseMatrix, Ptr{$T}),
-                        A.ptr, d)
-            if err != 0
-                error("usget_diag failed with code $(err)")
-            end
-            return d
-        end
-    end
+function Base.diag{T}(A::SparseMatrixRSB{T})
+    v = Vector{T}(min(size(A)...))
+    err = ccall((:rsb_mtx_get_vec, librsb), RSBErr,
+                (Ptr{Void}, Ptr{Void}, Cint),
+                A.ptr, v, RSB_EXTF_DIAG)
+    check_rsb_error(err)
+    return v
 end
 
 
@@ -353,94 +310,67 @@ end
 
 
 # Sparse matrix by vector multiplication
-for (blasfun, T, alphaT, alpha_value) in
-                (("BLAS_susmv", Float32, Float32, 1.0f0),
-                 ("BLAS_dusmv", Float64, Float64, 1.0),
-                 ("BLAS_cusmv", Complex64, Ptr{Complex64}, Ref(one(Complex64))),
-                 ("BLAS_zusmv", Complex128, Ptr{Complex128}, Ref(one(Complex128))))
-    for (f, op) in ((:A_mul_B!,  :blas_no_trans),
-                    (:At_mul_B!, :blas_trans),
-                    (:Ac_mul_B!, :blas_conj_trans))
-        @eval begin
-            function Base.$f(y::Vector{$T}, A::SparseMatrixRSB{$T}, x::Vector{$T})
-                m, n = size(A)
-                if $op == blas_no_trans
-                    @assert length(x) == n
-                    @assert length(y) == m
-                else
-                    @assert length(x) == m
-                    @assert length(y) == n
-                end
-                alpha = $alpha_value
-
-                fill!(y, zero($T))
-                err = ccall(($blasfun, librsb), Cint,
-                            (Cint,             # transA
-                             $alphaT,          # alpha
-                             BLASSparseMatrix, # A
-                             Ptr{$T},          # x
-                             Cint,             # incx
-                             Ptr{$T},          # y
-                             Cint),            # incy
-                            $op, alpha, A.ptr, x, 1, y, 1)
-                if err != 0
-                    error("$blasfun failed with code $err")
-                end
-                return y
+for (f, transA) in ((:A_mul_B!,  RSB_TRANSPOSITION_N),
+                    (:At_mul_B!, RSB_TRANSPOSITION_T),
+                    (:Ac_mul_B!, RSB_TRANSPOSITION_C))
+    @eval begin
+        function Base.$f{T}(y::Vector{T}, A::SparseMatrixRSB{T}, x::Vector{T})
+            m, n = size(A)
+            if $transA == RSB_TRANSPOSITION_N
+                @assert length(x) == n
+                @assert length(y) == m
+            else
+                @assert length(x) == m
+                @assert length(y) == n
             end
+
+            alpha = Ref{T}(one(T))
+            beta  = Ref{T}(zero(T))
+            err = ccall((:rsb_spmv, librsb), RSBErr,
+                        (RSBTrans, Ptr{Void}, Ptr{Void}, Ptr{Void}, RSBCooIdx,
+                         Ptr{Void}, Ptr{Void}, RSBCooIdx),
+                        $transA, alpha, A.ptr, x, 1, beta, y, 1)
+            check_rsb_error(err)
+            return y
         end
     end
 end
 
 
 # Sparse matrix by dense matrix multiplication
-for (blasfun, T, alphaT, alpha_value) in
-                (("BLAS_susmm", Float32, Float32, 1.0f0),
-                 ("BLAS_dusmm", Float64, Float64, 1.0),
-                 ("BLAS_cusmm", Complex64, Ptr{Complex64}, Ref(one(Complex64))),
-                 ("BLAS_zusmm", Complex128, Ptr{Complex128}, Ref(one(Complex128))))
-    for (f, op) in ((:A_mul_B!,  :blas_no_trans),
-                    (:At_mul_B!, :blas_trans),
-                    (:Ac_mul_B!, :blas_conj_trans))
-        @eval begin
-            function Base.$f(C::Matrix{$T}, A::SparseMatrixRSB{$T}, B::Matrix{$T})
-                ma, na = size(A)
-                mb, nb = size(B)
-                mc, nc = size(C)
+for (f, transA) in ((:A_mul_B!,  RSB_TRANSPOSITION_N),
+                    (:At_mul_B!, RSB_TRANSPOSITION_T),
+                    (:Ac_mul_B!, RSB_TRANSPOSITION_C))
+    @eval begin
+        function Base.$f{T}(C::Matrix{T}, A::SparseMatrixRSB{T}, B::Matrix{T})
+            ma, na = size(A)
+            mb, nb = size(B)
+            mc, nc = size(C)
 
-                if $op == blas_no_trans
-                    @assert na == mb
-                    @assert (mc, nc) == (ma, nb)
-                else
-                    @assert ma == mb
-                    @assert (mc, nc) == (na, nb)
-                end
-
-                alpha = $alpha_value
-                fill!(C, zero($T))
-                err = ccall(($blasfun, librsb), Cint,
-                            (Cint,             # order
-                             Cint,             # trans
-                             Cint,             # nrhs
-                             $alphaT,          # alpha
-                             BLASSparseMatrix, # A
-                             Ptr{$T},          # B
-                             Cint,             # leading B dimension
-                             Ptr{$T},          # C
-                             Cint),            # leading C dimension
-                            blas_colmajor, $op, nb, alpha, A.ptr, B, mb, C, na)
-
-                if err != 0
-                    error(string($blasfun, " failed with code $err"))
-                end
-                return C
+            if $transA == RSB_TRANSPOSITION_N
+                @assert na == mb
+                @assert (mc, nc) == (ma, nb)
+            else
+                @assert ma == mb
+                @assert (mc, nc) == (na, nb)
             end
+
+            alpha = Ref{T}(one(T))
+            beta  = Ref{T}(zero(T))
+            err = ccall((:rsb_spmm, librsb), RSBErr,
+                        (RSBTrans, Ptr{Void}, Ptr{Void}, RSBCooIdx, RSBFlags,
+                         Ptr{Void}, RSBNnzIdx, Ptr{Void}, Ptr{Void}, RSBNnzIdx),
+                        $transA, alpha, A.ptr, nb,
+                        RSB_FLAG_WANT_COLUMN_MAJOR_ORDER, B, mb, beta, C, na)
+            check_rsb_error(err)
+            return C
         end
     end
 end
 
 
 # TODO:
+# get column and row sums
 # convert{S, T}(::Type{SparseMatrixRSB{S}}, ::SparseMatrixRSB{T})
 # transpose / transpose!
 # conj / conj!

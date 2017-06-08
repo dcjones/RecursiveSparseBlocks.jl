@@ -96,11 +96,13 @@ end
         ay = A*x
         by = B*x
 
-        @test_approx_eq_eps maximum(abs(ay .- by)) zero(T) 1e-4
+        @test maximum(abs.(ay .- by)) ≈ zero(T) atol=1e-4
     end
 
+    #for T in [Float32, Float64, Complex64, Complex128]
     for T in [Float32, Float64, Complex64, Complex128]
-        n = 1000
+        #n = 1000
+        n = 100
         k = 100
         A = sprand(T, n, n, 0.1)
         B = SparseMatrixRSB(A)
@@ -109,7 +111,7 @@ end
         AX = A*X
         BX = B*X
 
-        @test_approx_eq_eps maximum(abs(AX .- BX)) zero(T) 1e-4
+        @test maximum(abs.(AX .- BX)) ≈ zero(T) atol=1e-4
     end
 end
 
