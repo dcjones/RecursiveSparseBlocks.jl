@@ -1,4 +1,3 @@
-
 # RecursiveSparseBlocks
 
 ![Travis Status](https://travis-ci.org/dcjones/RecursiveSparseBlocks.jl.svg?branch=master)
@@ -23,7 +22,7 @@ The following functionality is implemented:
 
 Obviously, there's more left to implement.
 
-## Benchamrks
+## Benchmarks
 
 For large matrices `SparseMatrixRSB` is much faster that Julia's built-in
 `SparseMatrixCSC` (in no small part because the former is multithreaded).
