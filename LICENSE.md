@@ -1,5 +1,5 @@
 
-Librsb is licenced under the GPL3 license, the RecursiveSparseBlocks.jl package
+Librsb is licenced under the LGPLv3 (Lesser GNU Public License version 3 or later) license, the RecursiveSparseBlocks.jl package
 is licensed under the MIT license:
 
 > Copyright (c) 2017 Daniel C. Jones (dcjones@cs.washington.edu)
